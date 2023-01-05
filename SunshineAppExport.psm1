@@ -64,11 +64,24 @@ function SunshineExport {
                     }
                 }
 
+                $ids = @()
+                foreach ($app in $json.apps) {
+                    if ($app.id) {
+                        $ids += $app.id
+                    }
+                }
+
+                $id = Get-Random
+                while ($ids.Contains($id.ToString())) {
+                    $id = Get-Random
+                }
+
                 $newApp = New-Object -TypeName psobject
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "name" -Value $game.name
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "output" -Value $logOutput
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "cmd" -Value $gameLaunchURI
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "image-path" -Value $sunshineGameCoverPath
+                Add-Member -InputObject $newApp -MemberType NoteProperty -Name "id" -Value $id.ToString()
 
                 $json.apps = $json.apps | ForEach-Object {
                     if ($_.cmd -eq $gameLaunchURI) {
