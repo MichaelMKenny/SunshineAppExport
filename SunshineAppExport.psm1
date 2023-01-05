@@ -21,6 +21,7 @@ function SunshineExport {
     $imageFormat = "System.Drawing.Imaging.ImageFormat" -as [type]
     
     # Set paths
+    $playniteExecutablePath = Join-Path -Path $PlayniteApi.Paths.ApplicationPath -ChildPath "Playnite.DesktopApp.exe"
     $appAssetsPath = Join-Path -Path $env:LocalAppData -ChildPath "Sunshine Playnite App Export\Apps"
     if (!(Test-Path $appAssetsPath -PathType Container)) {
         New-Item -ItemType Container -Path $appAssetsPath -Force
@@ -33,7 +34,7 @@ function SunshineExport {
     $json = ConvertFrom-Json (Get-Content $appsPath -Raw)
 
     foreach ($game in $PlayniteApi.MainView.SelectedGames) {
-        $gameLaunchURI = 'playnite://playnite/start/' + "$($game.id)"
+        $gameLaunchCmd = $playniteExecutablePath + " --start " + "$($game.id)"
         $gameName = $($game.name).Split([IO.Path]::GetInvalidFileNameChars()) -join ''
 
         # Set cover path and create blank file
@@ -79,19 +80,19 @@ function SunshineExport {
                 $newApp = New-Object -TypeName psobject
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "name" -Value $game.name
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "output" -Value $logOutput
-                Add-Member -InputObject $newApp -MemberType NoteProperty -Name "cmd" -Value $gameLaunchURI
+                Add-Member -InputObject $newApp -MemberType NoteProperty -Name "cmd" -Value $gameLaunchCmd
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "image-path" -Value $sunshineGameCoverPath
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "id" -Value $id.ToString()
 
                 $json.apps = $json.apps | ForEach-Object {
-                    if ($_.cmd -eq $gameLaunchURI) {
+                    if ($_.cmd -eq $gameLaunchCmd) {
                         $newApp
                     } else {
                         $_
                     } 
                 }
 
-                if (!($json.apps | Where-Object { $_.cmd -eq $gameLaunchURI })) {
+                if (!($json.apps | Where-Object { $_.cmd -eq $gameLaunchCmd })) {
                     $json.apps += $newApp
                 }
             }
