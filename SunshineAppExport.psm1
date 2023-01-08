@@ -80,19 +80,29 @@ function SunshineExport {
                 $newApp = New-Object -TypeName psobject
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "name" -Value $game.name
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "output" -Value $logOutput
-                Add-Member -InputObject $newApp -MemberType NoteProperty -Name "cmd" -Value $gameLaunchCmd
+                Add-Member -InputObject $newApp -MemberType NoteProperty -Name "detached" -Value @($gameLaunchCmd)
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "image-path" -Value $sunshineGameCoverPath
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "id" -Value $id.ToString()
 
                 $json.apps = $json.apps | ForEach-Object {
-                    if ($_.cmd -eq $gameLaunchCmd) {
-                        $newApp
+                    if ($_.detached) {
+                        if ($_.detached[0] -eq $gameLaunchCmd) {
+                            $newApp
+                        } else {
+                            $_
+                        }
                     } else {
                         $_
-                    } 
+                    }
                 }
 
-                if (!($json.apps | Where-Object { $_.cmd -eq $gameLaunchCmd })) {
+                if (!($json.apps | Where-Object { 
+                    if ($_.detached) {
+                        return $_.detached[0] -eq $gameLaunchCmd
+                    } else {
+                        return $false
+                    }
+                })) {
                     $json.apps += $newApp
                 }
             }
