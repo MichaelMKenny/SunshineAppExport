@@ -43,8 +43,6 @@ function SunshineExport {
             New-Item -ItemType File -Path $sunshineGameCoverPath -Force
         }
 
-        $logOutput = [System.IO.Path]::Combine($appAssetsPath, $game.id, "app.log")
-
         if ($null -ne $game.CoverImage) {
 
             $sourceCover = $PlayniteApi.Database.GetFullFilePath($game.CoverImage)
@@ -79,7 +77,6 @@ function SunshineExport {
 
                 $newApp = New-Object -TypeName psobject
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "name" -Value $game.name
-                Add-Member -InputObject $newApp -MemberType NoteProperty -Name "output" -Value $logOutput
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "detached" -Value @($gameLaunchCmd)
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "image-path" -Value $sunshineGameCoverPath
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "id" -Value $id.ToString()
