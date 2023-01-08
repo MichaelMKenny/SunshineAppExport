@@ -30,7 +30,7 @@ function SunshineExport {
     # Set creation counter
     $shortcutsCreatedCount = 0
 
-    $appsPath = "$Env:ProgramW6432\Sunshine\apps.json"
+    $appsPath = "$Env:ProgramW6432\Sunshine\config\apps.json"
     $json = ConvertFrom-Json (Get-Content $appsPath -Raw)
 
     foreach ($game in $PlayniteApi.MainView.SelectedGames) {
