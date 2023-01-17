@@ -4,3 +4,7 @@ Author: Michael Kenny
 Version: 1.0
 Module: SunshineAppExport.psm1
 Type: Script
+Icon: icon.png
+Links:
+    - Name: GitHub
+      Url: https://github.com/MichaelMKenny/SunshineAppExport
