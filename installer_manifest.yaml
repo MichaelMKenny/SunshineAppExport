@@ -1,0 +1,8 @@
+AddonId: SunshineAppExport
+Packages:
+  - Version: 1.0
+    RequiredApiVersion: 6.0.0
+    ReleaseDate: 2023-01-17
+    PackageUrl: https://github.com/MichaelMKenny/SunshineAppExport/releases/download/1.0/SunshineAppExport_1_0.pext
+    Changelog:
+      - Initial Release
