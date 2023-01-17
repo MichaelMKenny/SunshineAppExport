@@ -16,6 +16,84 @@ function SunshineExport {
         $scriptMainMenuItemActionArgs
     )
 
+    $windowCreationOptions = New-Object Playnite.SDK.WindowCreationOptions
+    $windowCreationOptions.ShowMinimizeButton = $false
+    $windowCreationOptions.ShowMaximizeButton = $false
+    
+    $window = $PlayniteApi.Dialogs.CreateWindow($windowCreationOptions)
+    $window.Title = "Sunshine App Export"
+    $window.SizeToContent = "WidthAndHeight"
+    $window.ResizeMode = "NoResize"
+    
+    # Set content of a window. Can be loaded from xaml, loaded from UserControl or created from code behind
+    [xml]$xaml = @"
+    <UserControl
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    
+        <UserControl.Resources>
+            <Style TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}" />
+        </UserControl.Resources>
+    
+        <StackPanel Margin="16,16,16,16">
+            <TextBlock Text="Enter your Sunshine apps.json path" 
+            Margin="0,0,0,8" 
+            VerticalAlignment="Center"/>
+
+            <TextBox x:Name="SunshinePath"
+            Margin="0,0,0,8"
+            Width="320"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"/>
+
+            <TextBlock x:Name="FinishedMessage" 
+            Margin="0,0,0,24" 
+            VerticalAlignment="Center"
+            Visibility="Collapsed"/>
+
+            <Button x:Name="OKButton"
+            IsDefault="true"
+            Width="72"
+            Height= "36"
+            HorizontalAlignment="Center"
+            Content="Start"/>
+        </StackPanel>
+    </UserControl>
+"@
+    $reader = [System.Xml.XmlNodeReader]::new($xaml)
+    $window.Content = [Windows.Markup.XamlReader]::Load($reader)
+
+    $appsPath = "$Env:ProgramW6432\Sunshine\config\apps.json"
+
+    $inputField = $window.Content.FindName("SunshinePath")
+    $inputField.Text = $appsPath    
+
+    # Attach a click event handler
+    $button = $window.Content.FindName("OKButton")
+    $button.Add_Click({
+        if ($button.Content -eq "Dismiss") {
+            $window.Close()
+        } else {
+            $appsPath = $inputField.Text
+            $appsPath = $appsPath -replace '"',''
+            $shortcutsCreatedCount = doWork($appsPath)
+            $button.Content = "Dismiss"
+
+            $finishedMessage = $window.Content.FindName("FinishedMessage")
+            $finishedMessage.Text = ("Created {0} Sunshine app shortcuts" -f $shortcutsCreatedCount)
+            $finishedMessage.Visibility = "Visible"
+        }
+    })
+    
+    # Set owner if you need to create modal dialog window
+    $window.Owner = $PlayniteApi.Dialogs.GetCurrentAppWindow()
+    $window.WindowStartupLocation = "CenterOwner"
+    
+    # Use Show or ShowDialog to show the window
+    $window.ShowDialog()
+}
+
+function doWork([string]$appsPath) {
     # Load assemblies
     Add-Type -AssemblyName System.Drawing
     $imageFormat = "System.Drawing.Imaging.ImageFormat" -as [type]
@@ -30,7 +108,6 @@ function SunshineExport {
     # Set creation counter
     $shortcutsCreatedCount = 0
 
-    $appsPath = "$Env:ProgramW6432\Sunshine\config\apps.json"
     $json = ConvertFrom-Json (Get-Content $appsPath -Raw)
 
     foreach ($game in $PlayniteApi.MainView.SelectedGames) {
@@ -40,7 +117,7 @@ function SunshineExport {
         # Set cover path and create blank file
         $sunshineGameCoverPath = [System.IO.Path]::Combine($appAssetsPath, $game.id, "box-art.png")
         if (!(Test-Path $sunshineGameCoverPath -PathType Container)) {
-            New-Item -ItemType File -Path $sunshineGameCoverPath -Force
+            $discard = New-Item -ItemType File -Path $sunshineGameCoverPath -Force
         }
 
         if ($null -ne $game.CoverImage) {
@@ -53,7 +130,7 @@ function SunshineExport {
                 } else {
                     # Convert cover image to compatible PNG image format
                     try {
-                        $image = [System.Drawing.Image]::FromFile($PlayniteApi.Database.GetFullFilePath($game.CoverImage))
+                        $image = [System.Drawing.Image]::FromFile($sourceCover)
                         $image.Save($sunshineGameCoverPath, $imageFormat::png)
                         $image.Dispose()
                     } catch {
@@ -110,6 +187,5 @@ function SunshineExport {
 
     ConvertTo-Json $json -Depth 100 | Out-File $appsPath -Encoding utf8
 
-    # Show finish dialogue with shortcut creation count
-    $PlayniteApi.Dialogs.ShowMessage(("Sunshine app shortcuts created: {0}" -f $shortcutsCreatedCount), "Sunshine App Export")
+    return $shortcutsCreatedCount
 }
