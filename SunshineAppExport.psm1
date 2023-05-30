@@ -225,6 +225,7 @@ function doWork([string]$appsPath) {
         $shortcutsCreatedCount++
     }
 
+    ConvertTo-Json $json -Depth 100 | Out-File $env:TEMP\apps.json -Encoding utf8
 
 
     $result = [System.Windows.Forms.MessageBox]::Show("You will be prompted for administrator rights, as Sunshine now requires administrator rights in order to modify the apps.json file.", "Administrator Required", [System.Windows.Forms.MessageBoxButtons]::OKCancel, [System.Windows.Forms.MessageBoxIcon]::Information)
@@ -233,7 +234,6 @@ function doWork([string]$appsPath) {
     }
     else {
         Start-Process powershell.exe  -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -Command `"Copy-Item -Path $env:TEMP\apps.json -Destination '$appsPath'`"" -WindowStyle Hidden
-        Remove-Item -Path $env:TEMP\apps.json -ErrorAction SilentlyContinue
     }
     
 
