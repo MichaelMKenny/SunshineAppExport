@@ -111,13 +111,12 @@ function doWork([string]$appsPath) {
     $json = ConvertFrom-Json (Get-Content $appsPath -Raw)
 
     foreach ($game in $PlayniteApi.MainView.SelectedGames) {
-        $gameLaunchCmd = $playniteExecutablePath + " --start " + "$($game.id)"
-        $gameName = $($game.name).Split([IO.Path]::GetInvalidFileNameChars()) -join ''
+        $gameLaunchCmd = "`"$playniteExecutablePath`" --start $($game.id)"
 
         # Set cover path and create blank file
         $sunshineGameCoverPath = [System.IO.Path]::Combine($appAssetsPath, $game.id, "box-art.png")
         if (!(Test-Path $sunshineGameCoverPath -PathType Container)) {
-            $discard = New-Item -ItemType File -Path $sunshineGameCoverPath -Force
+            New-Item -ItemType File -Path $sunshineGameCoverPath -Force | Out-Null
         }
 
         if ($null -ne $game.CoverImage) {
