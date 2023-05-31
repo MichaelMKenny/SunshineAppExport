@@ -185,7 +185,10 @@ function doWork([string]$appsPath) {
         $shortcutsCreatedCount++
     }
 
-    ConvertTo-Json $json -Depth 100 | Out-File $appsPath -Encoding utf8
+    $jsonObj = ConvertTo-Json $json -Depth 100
+    # Write this using utf8-noBOM, which depending on PS version, is not supported.
+    # so as a workaround, we'll use WriteAllLines which defaults to utf8-noBOM
+    [System.IO.File]::WriteAllLines($appsPath, $jsonObj)
 
     return $shortcutsCreatedCount
 }
