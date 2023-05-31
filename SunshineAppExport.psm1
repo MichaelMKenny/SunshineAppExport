@@ -92,7 +92,7 @@ function SunshineExport {
     $browseButton = $window.Content.FindName("BrowseButton")
     $browseButton.Add_Click({
             $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
-            $openFileDialog.InitialDirectory = $appsPath
+            $openFileDialog.InitialDirectory = Split-Path $inputField.Text -Parent
             $openFileDialog.Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*"
             $openFileDialog.Title = "Open apps.json"
     
