@@ -11,7 +11,7 @@ Packages:
       - Fixed exception for users who tried to export games with only one app added in Sunshine
       - Fixed the script adding corrupt characters to beginning apps.json, when exporting some games such as Marvel's Spider-Man Remastered and Pokémon Violet
       - Fixed an issue preventing exported games from launching if the user had spaces in the path to their playnite executable
-      Thank you Nonary for all the PRs to make this release possible.
+      - Thank you Nonary for all the PRs to make this release possible.
   - Version: 1.0
     RequiredApiVersion: 6.0.0
     ReleaseDate: 2023-01-17
