@@ -129,9 +129,9 @@ function SunshineExport {
 }
 
 function GetGameIdFromCmd([string]$cmd) {
-    $parts = $cmd.Split(" --start ")
+    $parts = $cmd -split " --start "
     if ($parts.Count -gt 1) {
-        return $parts[1].Split(" ")[0]
+        return ($parts[1] -split " ")[0]
     }
     else {
         return ""
@@ -206,7 +206,8 @@ function DoWork([string]$appsPath) {
 
                 $json.apps = $json.apps | ForEach-Object {
                     if ($_.detached) {
-                        if (GetGameIdFromCmd($_.detached[0]) -eq $game.id) {
+                        $gameId = GetGameIdFromCmd($_.detached[0])
+                        if ($gameId -eq $game.id) {
                             $newApp
                         }
                         else {
@@ -220,7 +221,8 @@ function DoWork([string]$appsPath) {
 
                 if (!($json.apps | Where-Object { 
                             if ($_.detached) {
-                                return GetGameIdFromCmd($_.detached[0]) -eq $game.id
+                                $gameId = GetGameIdFromCmd($_.detached[0])
+                                return $gameId -eq $game.id
                             }
                             else {
                                 return $false
