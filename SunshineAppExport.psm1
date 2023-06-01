@@ -128,6 +128,15 @@ function SunshineExport {
     $window.ShowDialog()
 }
 
+function GetGameIdFromCmd([string]$cmd) {
+    $parts = $cmd.Split(" --start ")
+    if ($parts.Count -gt 1) {
+        return $parts[1].Split(" ")[0]
+    } else {
+        return ""
+    }
+}
+
 function doWork([string]$appsPath) {
     # Load assemblies
     Add-Type -AssemblyName System.Drawing
@@ -196,7 +205,7 @@ function doWork([string]$appsPath) {
 
                 $json.apps = $json.apps | ForEach-Object {
                     if ($_.detached) {
-                        if ($_.detached[0] -eq $gameLaunchCmd) {
+                        if (GetGameIdFromCmd($_.detached[0]) -eq $game.id) {
                             $newApp
                         }
                         else {
@@ -210,7 +219,7 @@ function doWork([string]$appsPath) {
 
                 if (!($json.apps | Where-Object { 
                             if ($_.detached) {
-                                return $_.detached[0] -eq $gameLaunchCmd
+                                return GetGameIdFromCmd($_.detached[0]) -eq $game.id
                             }
                             else {
                                 return $false
