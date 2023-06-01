@@ -1,5 +1,19 @@
 AddonId: SunshineAppExport
 Packages:
+  - Version: 1.1.1
+    RequiredApiVersion: 6.0.0
+    ReleaseDate: 2023-06-01
+    PackageUrl: https://github.com/MichaelMKenny/SunshineAppExport/releases/download/1.1.1/SunshineAppExport_1_1_1.pext
+    Changelog:
+      - Fixed regression which made the script only able to export 1 game.
+      - -- Previous release notes --
+      - Added support for Sunshine 0.20
+      - Now asks for admin privileges when exporting apps, as Sunshine 0.20 now requires it for modifying apps.json
+      - Added a browse button next two apps.json path field, which opens a file open dialog to assist finding an apps.json file
+      - Fixed exception for users who tried to export games with only one app added in Sunshine
+      - Fixed the script adding corrupt characters to beginning apps.json, when exporting some games such as Marvel's Spider-Man Remastered and Pokémon Violet
+      - Fixed an issue preventing exported games from launching if the user had spaces in the path to their playnite executable
+      - Thank you Nonary for all the PRs to make this release possible.
   - Version: 1.1
     RequiredApiVersion: 6.0.0
     ReleaseDate: 2023-06-01
