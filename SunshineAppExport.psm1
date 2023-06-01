@@ -1,3 +1,6 @@
+# Load assemblies
+Add-Type -AssemblyName System.Windows.Forms
+
 function GetMainMenuItems {
     param(
         $getMainMenuItemsArgs
@@ -27,63 +30,95 @@ function SunshineExport {
     
     # Set content of a window. Can be loaded from xaml, loaded from UserControl or created from code behind
     [xml]$xaml = @"
-    <UserControl
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    
-        <UserControl.Resources>
-            <Style TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}" />
-        </UserControl.Resources>
-    
-        <StackPanel Margin="16,16,16,16">
-            <TextBlock Text="Enter your Sunshine apps.json path" 
-            Margin="0,0,0,8" 
-            VerticalAlignment="Center"/>
+<UserControl
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <UserControl.Resources>
+        <Style TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}" />
+    </UserControl.Resources>
+
+    <StackPanel Margin="16,16,16,16">
+        <TextBlock Text="Enter your Sunshine apps.json path" 
+        Margin="0,0,0,8" 
+        VerticalAlignment="Center"/>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
 
             <TextBox x:Name="SunshinePath"
-            Margin="0,0,0,8"
+            Grid.Column="0"
+            Margin="0,0,8,0"
             Width="320"
-            HorizontalAlignment="Left"
+            Height="36"
+            HorizontalAlignment="Stretch"
             VerticalAlignment="Top"/>
 
-            <TextBlock x:Name="FinishedMessage" 
-            Margin="0,0,0,24" 
-            VerticalAlignment="Center"
-            Visibility="Collapsed"/>
-
-            <Button x:Name="OKButton"
-            IsDefault="true"
+            <Button x:Name="BrowseButton"
+            Grid.Column="1"
             Width="72"
-            Height= "36"
-            HorizontalAlignment="Center"
-            Content="Start"/>
-        </StackPanel>
-    </UserControl>
+            Height="36"
+            HorizontalAlignment="Right"
+            Content="Browse"/>
+        </Grid>
+
+        <TextBlock x:Name="FinishedMessage" 
+        Margin="0,0,0,24" 
+        VerticalAlignment="Center"
+        Visibility="Collapsed"/>
+
+        <Button x:Name="OKButton"
+        IsDefault="true"
+        Height= "36"
+        Margin="0,5,0,0"
+        HorizontalAlignment="Center"
+        Content="Export Games"/>
+    </StackPanel>
+</UserControl>
 "@
+
     $reader = [System.Xml.XmlNodeReader]::new($xaml)
     $window.Content = [Windows.Markup.XamlReader]::Load($reader)
 
     $appsPath = "$Env:ProgramW6432\Sunshine\config\apps.json"
 
     $inputField = $window.Content.FindName("SunshinePath")
-    $inputField.Text = $appsPath    
+    $inputField.Text = $appsPath   
+    
+    # Attach a click event handler to the Browse button
+    $browseButton = $window.Content.FindName("BrowseButton")
+    $browseButton.Add_Click({
+            $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+            $openFileDialog.InitialDirectory = Split-Path $inputField.Text -Parent
+            $openFileDialog.Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*"
+            $openFileDialog.Title = "Open apps.json"
+    
+            if ($openFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                $inputField.Text = $openFileDialog.FileName
+            }
+        })
+    
 
     # Attach a click event handler
     $button = $window.Content.FindName("OKButton")
     $button.Add_Click({
-        if ($button.Content -eq "Dismiss") {
-            $window.Close()
-        } else {
-            $appsPath = $inputField.Text
-            $appsPath = $appsPath -replace '"',''
-            $shortcutsCreatedCount = doWork($appsPath)
-            $button.Content = "Dismiss"
+            if ($button.Content -eq "Dismiss") {
+                $window.Close()
+            }
+            else {
+                $appsPath = $inputField.Text
+                $appsPath = $appsPath -replace '"', ''
+                $shortcutsCreatedCount = doWork($appsPath)
+                $button.Content = "Dismiss"
 
-            $finishedMessage = $window.Content.FindName("FinishedMessage")
-            $finishedMessage.Text = ("Created {0} Sunshine app shortcuts" -f $shortcutsCreatedCount)
-            $finishedMessage.Visibility = "Visible"
-        }
-    })
+                $finishedMessage = $window.Content.FindName("FinishedMessage")
+                $finishedMessage.Text = ("Created {0} Sunshine app shortcuts" -f $shortcutsCreatedCount)
+                $finishedMessage.Visibility = "Visible"
+            }
+        })
     
     # Set owner if you need to create modal dialog window
     $window.Owner = $PlayniteApi.Dialogs.GetCurrentAppWindow()
@@ -126,13 +161,15 @@ function doWork([string]$appsPath) {
 
                 if ([System.IO.Path]::GetExtension($game.CoverImage) -eq ".png") {
                     Copy-Item $sourceCover $sunshineGameCoverPath -Force
-                } else {
+                }
+                else {
                     # Convert cover image to compatible PNG image format
                     try {
                         $image = [System.Drawing.Image]::FromFile($sourceCover)
                         $image.Save($sunshineGameCoverPath, $imageFormat::png)
                         $image.Dispose()
-                    } catch {
+                    }
+                    catch {
                         $image.Dispose()
                         $errorMessage = $_.Exception.Message
                         $__logger.Info("Error converting cover image of `"$($game.name)`". Error: $errorMessage")
@@ -161,21 +198,24 @@ function doWork([string]$appsPath) {
                     if ($_.detached) {
                         if ($_.detached[0] -eq $gameLaunchCmd) {
                             $newApp
-                        } else {
+                        }
+                        else {
                             $_
                         }
-                    } else {
+                    }
+                    else {
                         $_
                     }
                 }
 
                 if (!($json.apps | Where-Object { 
-                    if ($_.detached) {
-                        return $_.detached[0] -eq $gameLaunchCmd
-                    } else {
-                        return $false
-                    }
-                })) {
+                            if ($_.detached) {
+                                return $_.detached[0] -eq $gameLaunchCmd
+                            }
+                            else {
+                                return $false
+                            }
+                        })) {
                     $json.apps += $newApp
                 }
             }
@@ -184,7 +224,18 @@ function doWork([string]$appsPath) {
         $shortcutsCreatedCount++
     }
 
-    ConvertTo-Json $json -Depth 100 | Out-File $appsPath -Encoding utf8
+    ConvertTo-Json $json -Depth 100 | Out-File $env:TEMP\apps.json -Encoding utf8
+
+
+    $result = [System.Windows.Forms.MessageBox]::Show("You will be prompted for administrator rights, as Sunshine now requires administrator rights in order to modify the apps.json file.", "Administrator Required", [System.Windows.Forms.MessageBoxButtons]::OKCancel, [System.Windows.Forms.MessageBoxIcon]::Information)
+    if ($result -eq [System.Windows.Forms.DialogResult]::Cancel) {
+        return 0
+    }
+    else {
+        Start-Process powershell.exe  -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -Command `"Copy-Item -Path $env:TEMP\apps.json -Destination '$appsPath'`"" -WindowStyle Hidden
+    }
+    
+
 
     return $shortcutsCreatedCount
 }
