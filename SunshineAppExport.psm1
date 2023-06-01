@@ -217,7 +217,7 @@ function doWork([string]$appsPath) {
                                 return $false
                             }
                         })) {
-                    $json.apps += $newApp
+                    [object[]]$json.apps += $newApp
                 }
             }
         }
