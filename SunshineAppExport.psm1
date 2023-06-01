@@ -111,7 +111,7 @@ function SunshineExport {
             else {
                 $appsPath = $inputField.Text
                 $appsPath = $appsPath -replace '"', ''
-                $shortcutsCreatedCount = doWork($appsPath)
+                $shortcutsCreatedCount = DoWork($appsPath)
                 $button.Content = "Dismiss"
 
                 $finishedMessage = $window.Content.FindName("FinishedMessage")
@@ -132,12 +132,13 @@ function GetGameIdFromCmd([string]$cmd) {
     $parts = $cmd.Split(" --start ")
     if ($parts.Count -gt 1) {
         return $parts[1].Split(" ")[0]
-    } else {
+    }
+    else {
         return ""
     }
 }
 
-function doWork([string]$appsPath) {
+function DoWork([string]$appsPath) {
     # Load assemblies
     Add-Type -AssemblyName System.Drawing
     $imageFormat = "System.Drawing.Imaging.ImageFormat" -as [type]
@@ -246,7 +247,6 @@ function doWork([string]$appsPath) {
     else {
         Start-Process powershell.exe  -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -Command `"Copy-Item -Path $env:TEMP\apps.json -Destination '$appsPath'`"" -WindowStyle Hidden
     }
-    
 
 
     return $shortcutsCreatedCount
