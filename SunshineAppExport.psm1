@@ -228,7 +228,7 @@ function doWork([string]$appsPath) {
     $jsonObj = ConvertTo-Json $json -Depth 100
     # Write this using utf8-noBOM, which depending on PS version, is not supported.
     # so as a workaround, we'll use WriteAllLines which defaults to utf8-noBOM
-    [System.IO.File]::WriteAllLines($appsPath, $jsonObj)
+    [System.IO.File]::WriteAllLines("$env:TEMP\apps.json", $jsonObj)
 
 
     $result = [System.Windows.Forms.MessageBox]::Show("You will be prompted for administrator rights, as Sunshine now requires administrator rights in order to modify the apps.json file.", "Administrator Required", [System.Windows.Forms.MessageBoxButtons]::OKCancel, [System.Windows.Forms.MessageBoxIcon]::Information)
