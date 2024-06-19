@@ -175,12 +175,26 @@ function DoWork([string]$appsPath) {
                 else {
                     # Convert cover image to compatible PNG image format
                     try {
-                        $image = [System.Drawing.Image]::FromFile($sourceCover)
-                        $image.Save($sunshineGameCoverPath, $imageFormat::png)
-                        $image.Dispose()
+                        # Create a BitmapImage and load the JPG image
+                        $bitmap = New-Object System.Windows.Media.Imaging.BitmapImage
+                        $bitmap.BeginInit()
+                        $bitmap.UriSource = New-Object System.Uri($sourceCover, [System.UriKind]::Absolute)
+                        $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+                        $bitmap.EndInit()
+                    
+                        # Create a PngBitmapEncoder and add the BitmapFrame
+                        $encoder = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+                        $frame = [System.Windows.Media.Imaging.BitmapFrame]::Create($bitmap)
+                        $encoder.Frames.Add($frame)
+                    
+                        # Save the PNG image
+                        $fileStream = New-Object System.IO.FileStream($sunshineGameCoverPath, [System.IO.FileMode]::Create)
+                        $encoder.Save($fileStream)
+                        $fileStream.Close()
                     }
                     catch {
-                        $image.Dispose()
+                        if ($null -ne $bitmap) { $bitmap = $null }
+                        if ($null -ne $fileStream) { $fileStream.Close() }
                         $errorMessage = $_.Exception.Message
                         $__logger.Info("Error converting cover image of `"$($game.name)`". Error: $errorMessage")
                     }
