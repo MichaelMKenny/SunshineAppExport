@@ -1,7 +1,7 @@
 ﻿Id: SunshineAppExport
 Name: Sunshine App Export
 Author: MichaelMKenny
-Version: 1.1.1
+Version: 1.1.2
 Module: SunshineAppExport.psm1
 Type: Script
 Icon: icon.png
