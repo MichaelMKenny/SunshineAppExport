@@ -65,6 +65,27 @@ function SunshineExport {
             Content="Browse"/>
         </Grid>
 
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            
+            <CheckBox x:Name="SunshineAttached"
+            Grid.Column="0"
+            Margin="0,0,8,0"
+            Width="36"
+            Height="36"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Top"
+            IsChecked="True"/>
+
+            <TextBlock Text="Close game when SunShine session ends"
+            Grid.Column="1"
+            VerticalAlignment="Center"
+            HorizontalAlignment="Left"/>
+        </Grid>
+
         <TextBlock x:Name="FinishedMessage" 
         Margin="0,0,0,24" 
         VerticalAlignment="Center"
@@ -86,7 +107,7 @@ function SunshineExport {
     $appsPath = "$Env:ProgramW6432\Sunshine\config\apps.json"
 
     $inputField = $window.Content.FindName("SunshinePath")
-    $inputField.Text = $appsPath   
+    $inputField.Text = $appsPath
     
     # Attach a click event handler to the Browse button
     $browseButton = $window.Content.FindName("BrowseButton")
@@ -111,7 +132,10 @@ function SunshineExport {
             else {
                 $appsPath = $inputField.Text
                 $appsPath = $appsPath -replace '"', ''
-                $shortcutsCreatedCount = DoWork($appsPath)
+
+                $gameAttached = $window.Content.FindName("SunshineAttached").IsChecked
+
+                $shortcutsCreatedCount = DoWork $appsPath $gameAttached
                 $button.Content = "Dismiss"
 
                 $finishedMessage = $window.Content.FindName("FinishedMessage")
@@ -138,7 +162,7 @@ function GetGameIdFromCmd([string]$cmd) {
     }
 }
 
-function DoWork([string]$appsPath) {
+function DoWork([string]$appsPath,[bool]$gameAttached) {
     # Load assemblies
     Add-Type -AssemblyName System.Drawing
     $imageFormat = "System.Drawing.Imaging.ImageFormat" -as [type]
@@ -214,33 +238,51 @@ function DoWork([string]$appsPath) {
 
                 $newApp = New-Object -TypeName psobject
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "name" -Value $game.name
-                Add-Member -InputObject $newApp -MemberType NoteProperty -Name "detached" -Value @($gameLaunchCmd)
+                if( !$gameAttached ) {
+                    Add-Member -InputObject $newApp -MemberType NoteProperty -Name "detached" -Value @($gameLaunchCmd)
+                }
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "image-path" -Value $sunshineGameCoverPath
                 Add-Member -InputObject $newApp -MemberType NoteProperty -Name "id" -Value $id.ToString()
+                if( $gameAttached ) {
+                    Add-Member -InputObject $newApp -MemberType NoteProperty -Name "cmd" -Value $gameLaunchCmd
+                }
 
                 $json.apps = $json.apps | ForEach-Object {
+                    $found = $false
                     if ($_.detached) {
                         $gameId = GetGameIdFromCmd($_.detached[0])
                         if ($gameId -eq $game.id) {
-                            $newApp
-                        }
-                        else {
-                            $_
+                            $found = $true
                         }
                     }
-                    else {
+                    if( $_.cmd ) {
+                        $gameId = GetGameIdFromCmd($_.cmd)
+                        if( $gameId -eq $game.id ) {
+                            $found = $true
+                        }
+                    }
+                    if( $found ) {
+                        $newApp
+                    } else {
                         $_
                     }
                 }
 
                 if (!($json.apps | Where-Object { 
+                    $found = $false
                             if ($_.detached) {
                                 $gameId = GetGameIdFromCmd($_.detached[0])
-                                return $gameId -eq $game.id
+                                if( $gameId -eq $game.id ) {
+                                    $found = $true
+                                }
                             }
-                            else {
-                                return $false
+                            if( $_.cmd ) {
+                                $gameId = GetGameIdFromCmd($_.cmd)
+                                if( $gameId -eq $game.id ) {
+                                    $found = $true
+                                }
                             }
+                            return $found
                         })) {
                     [object[]]$json.apps += $newApp
                 }
