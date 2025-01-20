@@ -141,7 +141,6 @@ function GetGameIdFromCmd([string]$cmd) {
 function DoWork([string]$appsPath) {
     # Load assemblies
     Add-Type -AssemblyName System.Drawing
-    $imageFormat = "System.Drawing.Imaging.ImageFormat" -as [type]
     
     # Set paths
     $playniteExecutablePath = Join-Path -Path $PlayniteApi.Paths.ApplicationPath -ChildPath "Playnite.DesktopApp.exe"
