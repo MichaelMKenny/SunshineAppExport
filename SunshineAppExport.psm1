@@ -30,6 +30,7 @@ function Get-PluginConfig {
         SunshinePass            = ""
         IgnoreCertificateErrors = $true
         SyncOnStartup           = $false
+        KeepUpToDate            = $false
     }
 }
 
@@ -69,6 +70,7 @@ function Show-ConfigurationDialog {
         
         <CheckBox x:Name="IgnoreCertErrors" Content="Ignore Certificate Errors" Margin="0,0,0,15"/>
         <CheckBox x:Name="SyncOnStartup" Content="Sync on Playnite Startup" Margin="0,0,0,15"/>
+        <CheckBox x:Name="KeepUpToDate" Content="Keep up to date (Real-time sync)" Margin="0,0,0,15"/>
         
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="SaveButton" Content="Save" Width="75" Margin="0,0,10,0"/>
@@ -87,6 +89,7 @@ function Show-ConfigurationDialog {
     $window.Content.FindName("SunshinePass").Password = $config.SunshinePass
     $window.Content.FindName("IgnoreCertErrors").IsChecked = $config.IgnoreCertificateErrors
     $window.Content.FindName("SyncOnStartup").IsChecked = $config.SyncOnStartup
+    $window.Content.FindName("KeepUpToDate").IsChecked = $config.KeepUpToDate
 
     # Event Handlers
     $window.Content.FindName("SaveButton").Add_Click({
@@ -96,6 +99,7 @@ function Show-ConfigurationDialog {
                 SunshinePass            = $window.Content.FindName("SunshinePass").Password
                 IgnoreCertificateErrors = $window.Content.FindName("IgnoreCertErrors").IsChecked
                 SyncOnStartup           = $window.Content.FindName("SyncOnStartup").IsChecked
+                KeepUpToDate            = $window.Content.FindName("KeepUpToDate").IsChecked
             }
             Set-PluginConfig -Config $newConfig
             $window.Close()
@@ -110,6 +114,30 @@ function Show-ConfigurationDialog {
     $window.ShowDialog()
 }
 
+# Helper type for safe SSL validation without using PowerShell ScriptBlocks
+try {
+    $code = @"
+    using System;
+    using System.Net.Http;
+    using System.Security.Cryptography.X509Certificates;
+    using System.Net.Security;
+
+    namespace SunshineExport {
+        public class CertificateBypass {
+            public static Func<HttpRequestMessage, X509Certificate2, X509Chain, SslPolicyErrors, bool> Callback = 
+                (msg, cert, chain, sslErrors) => true;
+        }
+    }
+"@
+    if (-not ([System.Management.Automation.PSTypeName]'SunshineExport.CertificateBypass').Type) {
+        Add-Type -TypeDefinition $code -Language CSharp -ReferencedAssemblies System.Net.Http
+    }
+}
+catch {
+    # Ignored, type might already exist or assembly issue
+    $__logger.Error("Failed to add CertificateBypass type: $_")
+}
+
 function Invoke-SunshineRequest {
     param(
         [string]$Method,
@@ -121,34 +149,75 @@ function Invoke-SunshineRequest {
     $baseUri = $config.SunshineUrl.TrimEnd('/')
     $uri = "$baseUri$Endpoint"
 
-    $headers = @{}
-    if (![string]::IsNullOrEmpty($config.SunshineUser) -or ![string]::IsNullOrEmpty($config.SunshinePass)) {
-        $auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $config.SunshineUser, $config.SunshinePass)))
-        $headers.Add("Authorization", "Basic $auth")
-    }
-
-    $params = @{
-        Uri         = $uri
-        Method      = $Method
-        Headers     = $headers
-        ContentType = "application/json"
-    }
-
-    if ($Body) {
-        $params.Body = $Body | ConvertTo-Json -Depth 10
-    }
-
+    $handler = New-Object System.Net.Http.HttpClientHandler
     if ($config.IgnoreCertificateErrors) {
-        $params.SkipCertificateCheck = $true
+        try {
+            # Use the compiled C# delegate to avoid Runspace issues
+            $handler.ServerCertificateCustomValidationCallback = [SunshineExport.CertificateBypass]::Callback
+        }
+        catch {
+            $__logger.Error("Failed to set SSL bypass callback: $_")
+        }
     }
 
+    $client = New-Object System.Net.Http.HttpClient($handler)
     try {
-        $response = Invoke-RestMethod @params
-        return $response
+        $client.BaseAddress = New-Object System.Uri($baseUri)
+        
+        # Auth
+        if (![string]::IsNullOrEmpty($config.SunshineUser) -or ![string]::IsNullOrEmpty($config.SunshinePass)) {
+            $authBytes = [System.Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $config.SunshineUser, $config.SunshinePass))
+            $authString = [System.Convert]::ToBase64String($authBytes)
+            $client.DefaultRequestHeaders.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue("Basic", $authString)
+        }
+
+        # Content
+        $content = $null
+        if ($Body) {
+            $json = $Body | ConvertTo-Json -Depth 10
+            $content = New-Object System.Net.Http.StringContent($json, [System.Text.Encoding]::UTF8, "application/json")
+        }
+
+        $__logger.Info("Sunshine DEBUG: Invoking $Method request to $uri")
+
+        # Execute
+        if ($Method -eq "GET") {
+            $task = $client.GetAsync($Endpoint)
+        }
+        elseif ($Method -eq "POST") {
+            $task = $client.PostAsync($Endpoint, $content)
+        }
+        elseif ($Method -eq "DELETE") {
+            $task = $client.DeleteAsync($Endpoint)
+        }
+        
+        $task.Wait()
+        $result = $task.Result
+        
+        $responseBodyTask = $result.Content.ReadAsStringAsync()
+        $responseBodyTask.Wait()
+        $responseBody = $responseBodyTask.Result
+
+        if (-not $result.IsSuccessStatusCode) {
+            $__logger.Error("Sunshine DEBUG: API Error ($($result.StatusCode)): $responseBody")
+            throw "Sunshine API returned $($result.StatusCode): $responseBody"
+        }
+
+        $__logger.Info("Sunshine DEBUG: Request successful.")
+        
+        try {
+            if ([string]::IsNullOrWhiteSpace($responseBody)) {
+                return $null
+            }
+            return $responseBody | ConvertFrom-Json
+        }
+        catch {
+            return $responseBody
+        }
     }
-    catch {
-        $__logger.Error("Sunshine API Error: $_")
-        throw $_
+    finally {
+        $client.Dispose()
+        $handler.Dispose()
     }
 }
 
@@ -175,10 +244,93 @@ function OnApplicationStarted {
     $installedGames = $PlayniteApi.Database.Games | Where-Object { $_.IsInstalled }
     # Convert to List for Sync-Games
     $gamesList = New-Object System.Collections.Generic.List[Playnite.SDK.Models.Game]
-    $gamesList.AddRange($installedGames)
+    if ($installedGames) {
+        foreach ($game in $installedGames) {
+            $gamesList.Add($game)
+        }
+    }
     
     $count = Sync-Games -GamesToSync $gamesList -RemoveMissing $true
     $__logger.Info("Sunshine Export: Synced $count games on startup.")
+}
+
+function OnGameInstalled {
+    param($Event)
+    
+    $Game = $Event
+    # Check if input is the EventArgs wrapper (OnGameInstalledEventArgs)
+    if ($Event.PSObject.Properties['Game']) {
+        $Game = $Event.Game
+    }
+
+    $config = Get-PluginConfig
+    if ($config.KeepUpToDate) {
+        $gamesList = New-Object System.Collections.Generic.List[Playnite.SDK.Models.Game]
+        try {
+            $gamesList.Add($Game)
+            Sync-Games -GamesToSync $gamesList -RemoveMissing $false
+            $__logger.Info("Sunshine Export: Auto-synced installed game: $($Game.Name)")
+        }
+        catch {
+            $__logger.Error("Sunshine Export: Failed to process installed game. Input Type: $($Event.GetType().FullName). Error: $_")
+        }
+    }
+}
+
+function OnGameUninstalled {
+    param($Event)
+    
+    $Game = $Event
+    # Check if input is the EventArgs wrapper (OnGameUninstalledEventArgs)
+    if ($Event.PSObject.Properties['Game']) {
+        $Game = $Event.Game
+    }
+
+    $config = Get-PluginConfig
+    if ($config.KeepUpToDate) {
+        try {
+            $sunshineAppsResponse = Get-SunshineApps
+            $sunshineApps = $sunshineAppsResponse.apps
+        }
+        catch {
+            $__logger.Error("Sunshine Export: Failed to fetch apps for uninstall: $_")
+            return
+        }
+
+        # Check if we have apps to check
+        if ($null -eq $sunshineApps) {
+            $__logger.Info("Sunshine Export: No apps found in Sunshine to check for removal.")
+            return
+        }
+
+        $indexToRemove = -1
+        for ($i = 0; $i -lt $sunshineApps.Count; $i++) {
+            $app = $sunshineApps[$i]
+            
+            # Safely check for detached property and its content
+            if ($null -ne $app -and $null -ne $app.detached -and $app.detached.Count -gt 0) {
+                # GetGameIdFromCmd is defined later in the file, but visible in module scope
+                $detachedCmd = $app.detached[0]
+                if ($null -ne $detachedCmd) {
+                    $existingGameId = GetGameIdFromCmd($detachedCmd)
+                    if ($existingGameId -eq $Game.Id.ToString()) {
+                        $indexToRemove = $i
+                        break
+                    }
+                }
+            }
+        }
+        
+        if ($indexToRemove -ge 0) {
+            try {
+                Remove-SunshineApp -Index $indexToRemove
+                $__logger.Info("Sunshine Export: Auto-removed uninstalled game: $($Game.Name)")
+            }
+            catch {
+                $__logger.Error("Sunshine Export: Failed to remove uninstalled game: $_")
+            }
+        }
+    }
 }
 
 function SunshineExport {
@@ -186,8 +338,27 @@ function SunshineExport {
         $scriptMainMenuItemActionArgs
     )
 
-    $shortcutsCreatedCount = Sync-Games -GamesToSync $PlayniteApi.MainView.SelectedGames -RemoveMissing $false
-    $PlayniteApi.Dialogs.ShowMessage("Exported $shortcutsCreatedCount games to Sunshine.", "Sunshine Export")
+    $selectedInstalledGames = $PlayniteApi.MainView.SelectedGames | Where-Object { $_.IsInstalled }
+    
+    $gamesList = New-Object System.Collections.Generic.List[Playnite.SDK.Models.Game]
+    if ($selectedInstalledGames) {
+        foreach ($game in $selectedInstalledGames) {
+            $gamesList.Add($game)
+        }
+    }
+
+    $shortcutsCreatedCount = Sync-Games -GamesToSync $gamesList -RemoveMissing $false
+    
+    $totalSelected = 0
+    if ($PlayniteApi.MainView.SelectedGames) { $totalSelected = $PlayniteApi.MainView.SelectedGames.Count }
+
+    $message = "Exported $shortcutsCreatedCount games to Sunshine."
+    if ($totalSelected -gt $gamesList.Count) {
+        $skipped = $totalSelected - $gamesList.Count
+        $message += "`n($skipped non-installed games skipped)"
+    }
+
+    $PlayniteApi.Dialogs.ShowMessage($message, "Sunshine Export")
 }
 
 function GetGameIdFromCmd([string]$cmd) {
@@ -308,17 +479,7 @@ function Sync-Games {
 
     # 2. Remove Missing Games (if requested)
     if ($RemoveMissing) {
-        # We need to iterate backwards because removing items changes indices?
-        # Wait, Sunshine API uses index. If we remove item at index 0, does item at index 1 become 0?
-        # Most likely yes. So we should verify this or iterate backwards.
-        # However, the API documentation says: "Delete an application." DELETE /api/apps/{index}
-        # It's safer to iterate backwards.
-        
-        # Also, we need to be careful: if we remove an app, the indices of subsequent apps shift.
-        # So we should probably re-fetch the list or be very careful.
-        # Re-fetching is safer but slower.
-        # Iterating backwards is usually safe for removal by index.
-        
+       
         for ($i = $sunshineApps.Count - 1; $i -ge 0; $i--) {
             $app = $sunshineApps[$i]
             if ($app.detached -and $app.detached.Length -gt 0) {
@@ -331,7 +492,7 @@ function Sync-Games {
                             $__logger.Info("Removed Sunshine app for game ID: $existingGameId")
                         }
                         catch {
-                            $__logger.Error("Failed to remove Sunshine app at index $i: $_")
+                            $__logger.Error("Failed to remove Sunshine app at index ${i}: $_")
                         }
                     }
                 }
