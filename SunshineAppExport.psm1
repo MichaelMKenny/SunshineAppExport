@@ -176,6 +176,7 @@ function Invoke-SunshineRequest {
         if ($Body) {
             $json = $Body | ConvertTo-Json -Depth 10
             $content = New-Object System.Net.Http.StringContent($json, [System.Text.Encoding]::UTF8, "application/json")
+            $__logger.Info("Sunshine DEBUG: Request Body: $json")
         }
 
         $__logger.Info("Sunshine DEBUG: Invoking $Method request to $uri")
@@ -236,22 +237,45 @@ function Remove-SunshineApp {
 }
 
 function OnApplicationStarted {
-    $config = Get-PluginConfig
-    if (-not $config.SyncOnStartup) {
-        return
-    }
+    # Only set startup time - actual sync is deferred to OnLibraryUpdated
+    # This avoids race conditions with lazy-loading libraries like Epic Games Store
+    $script:AppStartTime = Get-Date
+    $script:HasRunStartupSync = $false
+    $__logger.Info("Sunshine Export: Application started, sync will run after library update.")
+}
 
-    $installedGames = $PlayniteApi.Database.Games | Where-Object { $_.IsInstalled }
-    # Convert to List for Sync-Games
-    $gamesList = New-Object System.Collections.Generic.List[Playnite.SDK.Models.Game]
-    if ($installedGames) {
-        foreach ($game in $installedGames) {
-            $gamesList.Add($game)
+function OnLibraryUpdated {
+    $config = Get-PluginConfig
+    if ($config.SyncOnStartup) {
+        # Only run once during startup window, use flag to prevent duplicates
+        if ($script:HasRunStartupSync) {
+            $__logger.Info("Sunshine Export: Startup sync already completed, skipping.")
+            return
+        }
+        
+        # Allow syncs triggered by library updates for the first 2 minutes to catch lazy-loaded libraries (like Epic)
+        if ($script:AppStartTime -and (Get-Date) -lt $script:AppStartTime.AddMinutes(2)) {
+            # Mark as running immediately to prevent concurrent syncs
+            $script:HasRunStartupSync = $true
+            
+            $__logger.Info("Sunshine Export: Triggering startup sync due to library update...")
+            
+            # Wait 10 seconds to ensure ALL library plugins have fully propagated IsInstalled states
+            # Epic Games Store is particularly slow to report installed status
+            Start-Sleep -Seconds 10
+
+            $installedGames = $PlayniteApi.Database.Games | Where-Object { $_.IsInstalled }
+            $gamesList = New-Object System.Collections.Generic.List[Playnite.SDK.Models.Game]
+            if ($installedGames) {
+                foreach ($game in $installedGames) {
+                    $gamesList.Add($game)
+                }
+            }
+            
+            $count = Sync-Games -GamesToSync $gamesList -RemoveMissing $true
+            $__logger.Info("Sunshine Export: Synced $count games after library update.")
         }
     }
-    
-    $count = Sync-Games -GamesToSync $gamesList -RemoveMissing $true
-    $__logger.Info("Sunshine Export: Synced $count games on startup.")
 }
 
 function OnGameInstalled {
@@ -371,16 +395,77 @@ function GetGameIdFromCmd([string]$cmd) {
     }
 }
 
+function PrepareGameCover {
+    param(
+        [Playnite.SDK.Models.Game]$Game,
+        [string]$TargetPath
+    )
+    
+    # Ensure target directory exists
+    $targetDir = [System.IO.Path]::GetDirectoryName($TargetPath)
+    if (!(Test-Path $targetDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+    
+    # Create blank file if it doesn't exist
+    if (!(Test-Path $TargetPath -PathType Leaf)) {
+        New-Item -ItemType File -Path $TargetPath -Force | Out-Null
+    }
+
+    if ($null -ne $Game.CoverImage) {
+        $sourceCover = $PlayniteApi.Database.GetFullFilePath($Game.CoverImage)
+        if (($Game.CoverImage -notmatch "^http") -and (Test-Path $sourceCover -PathType Leaf)) {
+            if ([System.IO.Path]::GetExtension($Game.CoverImage) -eq ".png") {
+                Copy-Item $sourceCover $TargetPath -Force
+            }
+            else {
+                # Convert cover image to compatible PNG image format
+                try {
+                    $bitmap = New-Object System.Windows.Media.Imaging.BitmapImage
+                    $bitmap.BeginInit()
+                    $bitmap.UriSource = New-Object System.Uri($sourceCover, [System.UriKind]::Absolute)
+                    $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+                    $bitmap.EndInit()
+                
+                    $encoder = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+                    $frame = [System.Windows.Media.Imaging.BitmapFrame]::Create($bitmap)
+                    $encoder.Frames.Add($frame)
+                
+                    $fileStream = New-Object System.IO.FileStream($TargetPath, [System.IO.FileMode]::Create)
+                    $encoder.Save($fileStream)
+                    $fileStream.Close()
+                }
+                catch {
+                    if ($null -ne $bitmap) { $bitmap = $null }
+                    if ($null -ne $fileStream) { $fileStream.Close() }
+                    $errorMessage = $_.Exception.Message
+                    $__logger.Info("Error converting cover image of `"$($Game.Name)`". Error: $errorMessage")
+                }
+            }
+        }
+    }
+    
+    # Verify cover image exists and is valid (not 0 bytes)
+    $finalCoverPath = $TargetPath
+    try {
+        $coverItem = Get-Item $TargetPath -ErrorAction Stop
+        if ($coverItem.Length -eq 0) {
+            $finalCoverPath = ""
+        }
+    }
+    catch {
+        $finalCoverPath = ""
+    }
+    
+    return $finalCoverPath
+}
+
 function Sync-Games {
     param(
         [System.Collections.Generic.List[Playnite.SDK.Models.Game]]$GamesToSync,
         [bool]$RemoveMissing = $false
     )
 
-    # Load assemblies
-    Add-Type -AssemblyName System.Drawing
-    $imageFormat = "System.Drawing.Imaging.ImageFormat" -as [type]
-    
     # Set paths
     $playniteExecutablePath = Join-Path -Path $PlayniteApi.Paths.ApplicationPath -ChildPath "Playnite.DesktopApp.exe"
     $appAssetsPath = Join-Path -Path $env:LocalAppData -ChildPath "Sunshine Playnite App Export\Apps"
@@ -399,87 +484,200 @@ function Sync-Games {
         return 0
     }
 
-    # Create a hashset of Game IDs to sync for O(1) lookup
-    $gamesToSyncIds = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($game in $GamesToSync) {
-        $gamesToSyncIds.Add($game.Id.ToString()) | Out-Null
+    # --- Phase 1: Deduplicate Existing Apps ---
+    # We must do this before syncing because deleting items shifts indices, which invalidates logic if done inline.
+    $duplicatesFound = $false
+    $idsToIndexMap = @{} # Key: GameID, Value: List of Indices
+
+    # 1. Map all existing apps
+    for ($i = 0; $i -lt $sunshineApps.Count; $i++) {
+        $app = $sunshineApps[$i]
+        if ($app.detached -and $app.detached.Length -gt 0) {
+            $existingGameId = GetGameIdFromCmd($app.detached[0])
+            if (![string]::IsNullOrEmpty($existingGameId)) {
+                if (-not $idsToIndexMap.ContainsKey($existingGameId)) {
+                    $idsToIndexMap[$existingGameId] = New-Object System.Collections.Generic.List[int]
+                }
+                $idsToIndexMap[$existingGameId].Add($i)
+            }
+        }
     }
 
-    # 1. Add/Update Games
+    # 2. Convert to flat list of indices to remove (Keep the first/lowest index, remove others)
+    $indicesToRemove = New-Object System.Collections.Generic.List[int]
+    foreach ($key in $idsToIndexMap.Keys) {
+        $indices = $idsToIndexMap[$key]
+        if ($indices.Count -gt 1) {
+            # Keep index 0 (the first one found, usually lowest), remove the rest
+            for ($k = 1; $k -lt $indices.Count; $k++) {
+                $indicesToRemove.Add($indices[$k])
+            }
+        }
+    }
+
+    # 3. Remove duplicates (Backwards to preserve indices)
+    if ($indicesToRemove.Count -gt 0) {
+        $duplicatesFound = $true
+        $indicesToRemove.Sort() 
+        $indicesToRemove.Reverse() # Remove from end to start
+        
+        foreach ($idx in $indicesToRemove) {
+            try {
+                Remove-SunshineApp -Index $idx
+                $__logger.Info("Sunshine Export: Removed duplicate app at index $idx")
+            }
+            catch {
+                $__logger.Error("Failed to remove duplicate app at index $idx : $_")
+            }
+        }
+    }
+
+    # 4. Re-fetch apps if we modified anything
+    if ($duplicatesFound) {
+        Start-Sleep -Milliseconds 500 # Brief pause for API to settle
+        try {
+            $sunshineAppsResponse = Get-SunshineApps
+            $sunshineApps = $sunshineAppsResponse.apps
+        }
+        catch {
+            $__logger.Error("Failed to re-fetch apps after deduplication.")
+            return 0
+        }
+    }
+    # ------------------------------------------
+
+    # Create a hashset of Game IDs to sync for O(1) lookup
+    $gamesToSyncIds = New-Object System.Collections.Generic.HashSet[string]
+    $gameNames = @()
     foreach ($game in $GamesToSync) {
+        $gamesToSyncIds.Add($game.Id.ToString()) | Out-Null
+        $gameNames += $game.Name
+    }
+    $__logger.Info("Sunshine Export: Found installed games: $($gameNames -join ', ')")
+
+    # Build a map of existing Game IDs to their Sunshine index for fast lookup
+    $existingGameIdToIndex = @{}
+    for ($i = 0; $i -lt $sunshineApps.Count; $i++) {
+        $app = $sunshineApps[$i]
+        if ($app.detached -and $app.detached.Length -gt 0) {
+            $existingGameId = GetGameIdFromCmd($app.detached[0])
+            if (![string]::IsNullOrEmpty($existingGameId)) {
+                # Only keep the first occurrence (duplicates handled in Phase 1)
+                if (-not $existingGameIdToIndex.ContainsKey($existingGameId)) {
+                    $existingGameIdToIndex[$existingGameId] = $i
+                }
+            }
+        }
+    }
+
+    # Separate games into NEW (not in Sunshine) and EXISTING (already in Sunshine)
+    $newGames = @()
+    $existingGames = @()
+    foreach ($game in $GamesToSync) {
+        if ($existingGameIdToIndex.ContainsKey($game.Id.ToString())) {
+            $existingGames += $game
+        }
+        else {
+            $newGames += $game
+        }
+    }
+    
+    $__logger.Info("Sunshine Export: $($newGames.Count) new games, $($existingGames.Count) existing games to sync.")
+
+    # --- Phase 2A: Add NEW games first ---
+    # This must be done before updates because adding apps can shift indices
+    foreach ($game in $newGames) {
         $gameLaunchCmd = "`"$playniteExecutablePath`" --start $($game.Id)"
-
-        # Set cover path and create blank file
+        
+        # Prepare cover image
         $sunshineGameCoverPath = [System.IO.Path]::Combine($appAssetsPath, $game.Id, "box-art.png")
-        if (!(Test-Path $sunshineGameCoverPath -PathType Container)) {
-            New-Item -ItemType File -Path $sunshineGameCoverPath -Force | Out-Null
-        }
-
-        if ($null -ne $game.CoverImage) {
-            $sourceCover = $PlayniteApi.Database.GetFullFilePath($game.CoverImage)
-            if (($game.CoverImage -notmatch "^http") -and (Test-Path $sourceCover -PathType Leaf)) {
-                if ([System.IO.Path]::GetExtension($game.CoverImage) -eq ".png") {
-                    Copy-Item $sourceCover $sunshineGameCoverPath -Force
-                }
-                else {
-                    # Convert cover image to compatible PNG image format
-                    try {
-                        $bitmap = New-Object System.Windows.Media.Imaging.BitmapImage
-                        $bitmap.BeginInit()
-                        $bitmap.UriSource = New-Object System.Uri($sourceCover, [System.UriKind]::Absolute)
-                        $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
-                        $bitmap.EndInit()
-                    
-                        $encoder = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
-                        $frame = [System.Windows.Media.Imaging.BitmapFrame]::Create($bitmap)
-                        $encoder.Frames.Add($frame)
-                    
-                        $fileStream = New-Object System.IO.FileStream($sunshineGameCoverPath, [System.IO.FileMode]::Create)
-                        $encoder.Save($fileStream)
-                        $fileStream.Close()
-                    }
-                    catch {
-                        if ($null -ne $bitmap) { $bitmap = $null }
-                        if ($null -ne $fileStream) { $fileStream.Close() }
-                        $errorMessage = $_.Exception.Message
-                        $__logger.Info("Error converting cover image of `"$($game.Name)`". Error: $errorMessage")
-                    }
-                }
-            }
-        }
-
-        # Check if app already exists in Sunshine
-        $existingAppIndex = -1
-        for ($i = 0; $i -lt $sunshineApps.Count; $i++) {
-            $app = $sunshineApps[$i]
-            if ($app.detached -and $app.detached.Length -gt 0) {
-                $existingGameId = GetGameIdFromCmd($app.detached[0])
-                if ($existingGameId -eq $game.Id.ToString()) {
-                    $existingAppIndex = $i
-                    break
-                }
-            }
-        }
-
+        $finalCoverPath = PrepareGameCover -Game $game -TargetPath $sunshineGameCoverPath
+        
         $newApp = @{
             name         = $game.Name
             detached     = @($gameLaunchCmd)
-            "image-path" = $sunshineGameCoverPath
-            index        = $existingAppIndex
+            "image-path" = $finalCoverPath
+            index        = -1  # New app
         }
 
         try {
             Add-SunshineApp -App $newApp
             $shortcutsCreatedCount++
+            $__logger.Info("Sunshine Export: Added new game: $($game.Name)")
         }
         catch {
-            $__logger.Error("Failed to add/update app for game $($game.Name): $_")
+            $__logger.Error("Failed to add new app for game $($game.Name): $_")
+        }
+    }
+
+    # --- Phase 2B: Re-fetch apps after adding new ones to get fresh indices ---
+    if ($newGames.Count -gt 0 -and $existingGames.Count -gt 0) {
+        Start-Sleep -Milliseconds 300  # Brief pause for API to settle
+        try {
+            $sunshineAppsResponse = Get-SunshineApps
+            $sunshineApps = $sunshineAppsResponse.apps
+            
+            # Rebuild the index map with fresh data
+            $existingGameIdToIndex = @{}
+            for ($i = 0; $i -lt $sunshineApps.Count; $i++) {
+                $app = $sunshineApps[$i]
+                if ($app.detached -and $app.detached.Length -gt 0) {
+                    $existingGameId = GetGameIdFromCmd($app.detached[0])
+                    if (![string]::IsNullOrEmpty($existingGameId)) {
+                        if (-not $existingGameIdToIndex.ContainsKey($existingGameId)) {
+                            $existingGameIdToIndex[$existingGameId] = $i
+                        }
+                    }
+                }
+            }
+        }
+        catch {
+            $__logger.Error("Failed to re-fetch apps after adding new games: $_")
+            # Continue with stale data - updates may be slightly off but better than failing
+        }
+    }
+
+    # --- Phase 2C: Update EXISTING games with fresh indices ---
+    foreach ($game in $existingGames) {
+        $gameLaunchCmd = "`"$playniteExecutablePath`" --start $($game.Id)"
+        
+        # Prepare cover image
+        $sunshineGameCoverPath = [System.IO.Path]::Combine($appAssetsPath, $game.Id, "box-art.png")
+        $finalCoverPath = PrepareGameCover -Game $game -TargetPath $sunshineGameCoverPath
+        
+        # Get the current index from our map (should exist since we categorized it as existing)
+        $currentIndex = $existingGameIdToIndex[$game.Id.ToString()]
+        
+        $newApp = @{
+            name         = $game.Name
+            detached     = @($gameLaunchCmd)
+            "image-path" = $finalCoverPath
+            index        = $currentIndex
+        }
+
+        try {
+            Add-SunshineApp -App $newApp
+            $shortcutsCreatedCount++
+            $__logger.Info("Sunshine DEBUG: Updated game at index $currentIndex : $($game.Name)")
+        }
+        catch {
+            $__logger.Error("Failed to update app for game $($game.Name): $_")
         }
     }
 
     # 2. Remove Missing Games (if requested)
     if ($RemoveMissing) {
-       
+        # We need to iterate backwards because removing items changes indices?
+        # Wait, Sunshine API uses index. If we remove item at index 0, does item at index 1 become 0?
+        # Most likely yes. So we should verify this or iterate backwards.
+        # However, the API documentation says: "Delete an application." DELETE /api/apps/{index}
+        # It's safer to iterate backwards.
+        
+        # Also, we need to be careful: if we remove an app, the indices of subsequent apps shift.
+        # So we should probably re-fetch the list or be very careful.
+        # Re-fetching is safer but slower.
+        # Iterating backwards is usually safe for removal by index.
+        
         for ($i = $sunshineApps.Count - 1; $i -ge 0; $i--) {
             $app = $sunshineApps[$i]
             if ($app.detached -and $app.detached.Length -gt 0) {
