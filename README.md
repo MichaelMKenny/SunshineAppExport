@@ -1,9 +1,26 @@
 # SunshineAppExport
 
-This is a [Playnite](https://github.com/JosefNemec/Playnite) addon that creates custom [Sunshine](https://github.com/LizardByte/Sunshine) apps from the currently selected games in Playnite.
+This is a [Playnite](https://github.com/JosefNemec/Playnite) addon that automatically syncs your installed games to [Sunshine](https://github.com/LizardByte/Sunshine), allowing you to stream them via [Moonlight](https://github.com/moonlight-stream).
 
-Once imported, you can launch them from [Moonlight](https://github.com/moonlight-stream). It even imports your Playnite box art.
+## Features
+- **Automatic Sync**: Syncs all installed games to Sunshine when Playnite starts.
+- **Real-Time Sync**: Automatically adds or removes games from Sunshine when they are installed or uninstalled in Playnite.
+- **Manual Export**: Export specific selected games via the Extensions menu.
+- **Smart Removal**: Automatically removes games from Sunshine when they are uninstalled from Playnite (only affects games created by this extension).
+- **Cover Art**: Uploads Playnite box art to Sunshine.
 
-By default it will look for Sunshine's `apps.json` file at `C:\Program Files\Sunshine\config\apps.json`, but if you have a custom Sunshine install directory, the addon will ask you if you want to change where it looks for `apps.json`. 
+## Configuration
+1. Go to **Extensions** -> **Sunshine App Export** -> **Configure Sunshine Export**.
+2. Enter your Sunshine API URL (default: `https://localhost:47990`).
+3. Enter your Sunshine **Username** and **Password**.
+4. (Optional) Check **Ignore Certificate Errors** if you are using a self-signed certificate (common for default Sunshine installs).
+5. (Optional) Check **Sync on Playnite Startup** to sync your entire library completely every time Playnite starts (default: Off).
+6. (Optional) Check **Keep up to date (Real-time sync)** to automatically add/remove games in Sunshine as you install/uninstall them in Playnite (default: Off).
 
-<img src="dialog_screenshot.png" width="352">
+## Usage
+- **Manual**: Select games in Playnite, then select **Extensions** -> **Sunshine App Export** -> **Export selected games**.
+- **Automatic**: If enabled in settings, just launch Playnite. Your library will be synced in the background.
+
+## Requirements
+- Playnite
+- Sunshine (running and accessible)
